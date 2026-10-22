@@ -1,20 +1,132 @@
-// Crea las colecciones y valida la forma básica de sus documentos.
-// Se puede ejecutar más de una vez: actualiza validadores existentes y no borra datos.
+// Crea agregados documentales validados para el gestor IAM.
+// No define colecciones de catálogo ni relaciones por campos ID.
 (() => {
-  const iam = db.getSiblingDB("gestor_accesos_iam");
-
-  const nullableString = { bsonType: ["string", "null"] };
+  const iam = db.getSiblingDB("gestor_accesos_iam_embebido");
+  const string = { bsonType: "string" };
   const nullableDate = { bsonType: ["date", "null"] };
-  const approvalStep = {
+
+  const rolResumen = {
+    bsonType: "object",
+    required: ["codigo", "nombre", "descripcion"],
+    properties: {
+      codigo: string,
+      nombre: string,
+      descripcion: string
+    }
+  };
+
+  const permiso = {
+    bsonType: "object",
+    required: ["codigo", "nombre", "descripcion", "activo"],
+    properties: {
+      codigo: string,
+      nombre: string,
+      descripcion: string,
+      activo: { bsonType: "bool" }
+    }
+  };
+
+  const aplicacion = {
+    bsonType: "object",
+    required: ["codigo", "nombre", "descripcion", "permisos", "activo"],
+    properties: {
+      codigo: string,
+      nombre: string,
+      descripcion: string,
+      permisos: { bsonType: "array", items: permiso },
+      activo: { bsonType: "bool" }
+    }
+  };
+
+  const rol = {
+    bsonType: "object",
+    required: ["codigo", "nombre", "descripcion", "aplicaciones", "activo"],
+    properties: {
+      codigo: string,
+      nombre: string,
+      descripcion: string,
+      aplicaciones: { bsonType: "array", items: aplicacion },
+      activo: { bsonType: "bool" }
+    }
+  };
+
+  const area = {
+    bsonType: "object",
+    required: ["codigo", "nombre", "descripcion", "activo"],
+    properties: {
+      codigo: string,
+      nombre: string,
+      descripcion: string,
+      activo: { bsonType: "bool" }
+    }
+  };
+
+  const puesto = {
+    bsonType: "object",
+    required: ["codigo", "nombre", "descripcion", "roles", "activo"],
+    properties: {
+      codigo: string,
+      nombre: string,
+      descripcion: string,
+      roles: { bsonType: "array", items: rol },
+      activo: { bsonType: "bool" }
+    }
+  };
+
+  const persona = {
+    bsonType: "object",
+    required: ["legajo", "nombre", "apellido", "email", "area", "puesto", "rolesEfectivos"],
+    properties: {
+      legajo: string,
+      nombre: string,
+      apellido: string,
+      email: string,
+      area: {
+        bsonType: "object",
+        required: ["codigo", "nombre", "descripcion"],
+        properties: {
+          codigo: string,
+          nombre: string,
+          descripcion: string
+        }
+      },
+      puesto: {
+        bsonType: "object",
+        required: ["codigo", "nombre", "descripcion"],
+        properties: {
+          codigo: string,
+          nombre: string,
+          descripcion: string
+        }
+      },
+      rolesEfectivos: { bsonType: "array", items: rolResumen }
+    }
+  };
+
+  const asignacionDirecta = {
+    bsonType: "object",
+    required: ["rol", "origen", "motivo", "asignadoPor", "fechaInicio", "fechaFin"],
+    properties: {
+      rol,
+      origen: { enum: ["DIRECTO", "SOLICITUD"] },
+      motivo: string,
+      asignadoPor: { bsonType: ["object", "null"] },
+      fechaInicio: { bsonType: "date" },
+      fechaFin: nullableDate
+    }
+  };
+
+  const pasoAprobacion = {
     bsonType: "object",
     required: [
-      "paso", "rolAprobadorId", "aprobadorId", "estado",
-      "fechaAsignacion", "fechaDecision", "comentario"
+      "numeroPaso", "rolAprobador", "aprobadorAsignado", "aprobador",
+      "estado", "fechaAsignacion", "fechaDecision", "comentario"
     ],
     properties: {
-      paso: { bsonType: ["int", "long", "double"], minimum: 1 },
-      rolAprobadorId: { bsonType: "string" },
-      aprobadorId: nullableString,
+      numeroPaso: { bsonType: ["int", "long", "double"], minimum: 1 },
+      rolAprobador: rolResumen,
+      aprobadorAsignado: persona,
+      aprobador: { bsonType: ["object", "null"] },
       estado: { enum: ["PENDIENTE", "APROBADA", "RECHAZADA"] },
       fechaAsignacion: { bsonType: "date" },
       fechaDecision: nullableDate,
@@ -22,196 +134,97 @@
     }
   };
 
-  const roleGrant = {
+  const eventoAuditoria = {
     bsonType: "object",
-    required: [
-      "rolId", "origen", "solicitudOrigenId", "asignadoPorId",
-      "motivo", "fechaInicio", "fechaFin"
-    ],
+    required: ["actor", "accion", "fechaEvento", "detalle"],
     properties: {
-      rolId: { bsonType: "string" },
-      origen: { enum: ["DIRECTO", "SOLICITUD"] },
-      solicitudOrigenId: nullableString,
-      asignadoPorId: nullableString,
-      motivo: nullableString,
-      fechaInicio: { bsonType: "date" },
-      fechaFin: nullableDate
+      actor: {
+        bsonType: "object",
+        required: ["legajo", "nombre", "apellido"],
+        properties: {
+          legajo: string,
+          nombre: string,
+          apellido: string
+        }
+      },
+      accion: string,
+      fechaEvento: { bsonType: "date" },
+      detalle: { bsonType: "object" }
     }
   };
 
-  const collections = [
+  const schemas = [
     {
-      name: "areas",
-      schema: {
-        bsonType: "object",
-        required: ["_id", "nombre", "activo"],
-        properties: {
-          _id: { bsonType: "string" },
-          nombre: { bsonType: "string", minLength: 1 },
-          descripcion: { bsonType: "string" },
-          activo: { bsonType: "bool" }
-        }
-      }
-    },
-    {
-      name: "puestos",
-      schema: {
-        bsonType: "object",
-        required: ["_id", "nombre", "roles", "activo"],
-        properties: {
-          _id: { bsonType: "string" },
-          nombre: { bsonType: "string", minLength: 1 },
-          descripcion: { bsonType: "string" },
-          roles: { bsonType: "array", items: { bsonType: "string" } },
-          activo: { bsonType: "bool" }
-        }
-      }
-    },
-    {
-      name: "roles",
-      schema: {
-        bsonType: "object",
-        required: ["_id", "codigo", "nombre", "permisos", "activo"],
-        properties: {
-          _id: { bsonType: "string" },
-          codigo: { bsonType: "string", minLength: 1 },
-          nombre: { bsonType: "string", minLength: 1 },
-          descripcion: { bsonType: "string" },
-          permisos: {
-            bsonType: "array",
-            items: {
-              bsonType: "object",
-              required: ["aplicacionId", "permisoId"],
-              properties: {
-                aplicacionId: { bsonType: "string" },
-                permisoId: { bsonType: "string" }
-              }
-            }
-          },
-          activo: { bsonType: "bool" }
-        }
-      }
-    },
-    {
-      name: "aplicaciones",
-      schema: {
-        bsonType: "object",
-        required: ["_id", "codigo", "nombre", "permisos", "activo"],
-        properties: {
-          _id: { bsonType: "string" },
-          codigo: { bsonType: "string", minLength: 1 },
-          nombre: { bsonType: "string", minLength: 1 },
-          descripcion: { bsonType: "string" },
-          permisos: {
-            bsonType: "array",
-            items: {
-              bsonType: "object",
-              required: ["permisoId", "codigo", "nombre", "activo"],
-              properties: {
-                permisoId: { bsonType: "string" },
-                codigo: { bsonType: "string" },
-                nombre: { bsonType: "string" },
-                descripcion: { bsonType: "string" },
-                activo: { bsonType: "bool" }
-              }
-            }
-          },
-          activo: { bsonType: "bool" }
-        }
-      }
-    },
-    {
-      name: "empleados",
-      schema: {
+      nombre: "empleados",
+      esquema: {
         bsonType: "object",
         required: [
-          "_id", "legajo", "nombre", "apellido", "email",
-          "areaId", "puestoId", "fechaAlta", "rolesDirectos", "activo"
+          "_id", "legajo", "nombre", "apellido", "email", "area", "puesto",
+          "fechaAlta", "rolesDirectos", "activo"
         ],
         properties: {
-          _id: { bsonType: "string" },
-          legajo: { bsonType: "string", minLength: 1 },
-          nombre: { bsonType: "string", minLength: 1 },
-          apellido: { bsonType: "string", minLength: 1 },
-          email: { bsonType: "string", minLength: 3 },
-          areaId: { bsonType: "string" },
-          puestoId: { bsonType: "string" },
+          _id: string,
+          legajo: string,
+          nombre: string,
+          apellido: string,
+          email: string,
+          area,
+          puesto,
           fechaAlta: { bsonType: "date" },
-          rolesDirectos: { bsonType: "array", items: roleGrant },
+          rolesDirectos: { bsonType: "array", items: asignacionDirecta },
           activo: { bsonType: "bool" }
         }
       }
     },
     {
-      name: "solicitudes",
-      schema: {
+      nombre: "solicitudes",
+      esquema: {
         bsonType: "object",
         required: [
-          "_id", "solicitanteId", "rolSolicitadoId", "rolAnteriorId",
-          "tipo", "estado", "motivo", "fechaCreacion", "fechaCierre", "aprobaciones"
+          "_id", "solicitante", "rolSolicitado", "rolAnterior", "tipo", "estado",
+          "motivo", "fechaCreacion", "fechaCierre", "aprobaciones", "auditoria"
         ],
         properties: {
-          _id: { bsonType: "string" },
-          solicitanteId: { bsonType: "string" },
-          rolSolicitadoId: { bsonType: "string" },
-          rolAnteriorId: nullableString,
+          _id: string,
+          solicitante: persona,
+          rolSolicitado: rol,
+          rolAnterior: { bsonType: ["object", "null"] },
           tipo: { enum: ["ALTA", "BAJA", "MODIFICACION"] },
           estado: {
             enum: ["PENDIENTE", "EN_APROBACION", "APROBADA", "RECHAZADA", "CANCELADA"]
           },
-          motivo: { bsonType: "string", minLength: 1 },
+          motivo: string,
           fechaCreacion: { bsonType: "date" },
           fechaCierre: nullableDate,
-          aprobaciones: { bsonType: "array", items: approvalStep }
-        }
-      }
-    },
-    {
-      name: "auditoria",
-      schema: {
-        bsonType: "object",
-        required: [
-          "_id", "actorId", "solicitudId", "objetoTipo", "objetoId",
-          "accion", "fechaEvento", "detalle"
-        ],
-        properties: {
-          _id: { bsonType: "string" },
-          actorId: nullableString,
-          solicitudId: nullableString,
-          objetoTipo: { bsonType: "string" },
-          objetoId: { bsonType: "string" },
-          accion: { bsonType: "string" },
-          fechaEvento: { bsonType: "date" },
-          detalle: { bsonType: "object" }
+          aprobaciones: { bsonType: "array", items: pasoAprobacion },
+          auditoria: { bsonType: "array", items: eventoAuditoria }
         }
       }
     }
   ];
 
-  for (const collection of collections) {
-    const validator = { $jsonSchema: collection.schema };
-    const existing = iam.getCollectionInfos({ name: collection.name }).length > 0;
+  for (const coleccion of schemas) {
+    const validator = { $jsonSchema: coleccion.esquema };
+    const existe = iam.getCollectionInfos({ name: coleccion.nombre }).length > 0;
 
-    if (existing) {
-      const result = iam.runCommand({
-        collMod: collection.name,
+    if (existe) {
+      const resultado = iam.runCommand({
+        collMod: coleccion.nombre,
         validator,
         validationLevel: "strict",
         validationAction: "error"
       });
-      if (result.ok !== 1) {
-        throw new Error(`No se pudo actualizar el validador de ${collection.name}`);
-      }
-      print(`Validador actualizado: ${collection.name}`);
+      if (resultado.ok !== 1) throw new Error(`No se validó ${coleccion.nombre}`);
+      print(`Validador actualizado: ${coleccion.nombre}`);
     } else {
-      iam.createCollection(collection.name, {
+      iam.createCollection(coleccion.nombre, {
         validator,
         validationLevel: "strict",
         validationAction: "error"
       });
-      print(`Colección creada: ${collection.name}`);
+      print(`Colección creada: ${coleccion.nombre}`);
     }
   }
 
-  print(`Estructura lista en ${iam.getName()}`);
+  print(`Estructura embebida lista en ${iam.getName()}.`);
 })();

@@ -1,331 +1,357 @@
-// Ejemplos de alta de solicitud, aprobación, asignación y consultas.
-// Ejecutar después de 01_crear_estructura.js y 02_cargar_datos_demo.js.
+// Operaciones del ejemplo sobre dos agregados: empleados y solicitudes.
+// Las consultas no buscan datos relacionados en otras colecciones.
 (() => {
-  const iam = db.getSiblingDB("gestor_accesos_iam");
+  const iam = db.getSiblingDB("gestor_accesos_iam_embebido");
+  const fechaCreacion = new Date();
 
-  function requerido(coleccion, id) {
-    const documento = iam.getCollection(coleccion).findOne({ _id: id });
-    if (!documento) {
-      throw new Error(`No existe ${coleccion} con _id=${id}. Cargá primero los datos de ejemplo.`);
-    }
-    return documento;
-  }
-
-  function crearSolicitudSiFalta(solicitud) {
-    const solicitudes = iam.getCollection("solicitudes");
-    if (solicitudes.findOne({ _id: solicitud._id })) {
-      print(`La solicitud ${solicitud._id} ya existe; se conserva su estado.`);
-      return;
-    }
-
-    solicitudes.insertOne(solicitud);
-    iam.auditoria.updateOne(
-      { _id: `AUD-${solicitud._id}-CREADA` },
+  const solicitante = {
+    legajo: "1001",
+    nombre: "Lucía",
+    apellido: "Pérez",
+    email: "lucia.perez@ejemplo.com",
+    area: {
+      codigo: "TI",
+      nombre: "Tecnología",
+      descripcion: "Desarrollo y soporte de sistemas"
+    },
+    puesto: {
+      codigo: "ANALISTA_SISTEMAS",
+      nombre: "Analista de sistemas",
+      descripcion: "Puesto del área de tecnología"
+    },
+    rolesEfectivos: [
       {
-        $setOnInsert: {
-          _id: `AUD-${solicitud._id}-CREADA`,
-          actorId: solicitud.solicitanteId,
-          solicitudId: solicitud._id,
-          objetoTipo: "SOLICITUD",
-          objetoId: solicitud._id,
-          accion: "SOLICITUD_CREADA",
-          fechaEvento: solicitud.fechaCreacion,
-          detalle: {
-            tipo: solicitud.tipo,
-            rolSolicitadoId: solicitud.rolSolicitadoId,
-            motivo: solicitud.motivo
-          }
-        }
-      },
-      { upsert: true }
-    );
-    print(`Solicitud creada: ${solicitud._id}`);
-  }
-
-  function rolesEfectivos(empleado) {
-    const ids = [];
-    const puesto = iam.puestos.findOne({ _id: empleado.puestoId });
-    (puesto?.roles ?? []).forEach((rolId) => {
-      if (!ids.includes(rolId)) ids.push(rolId);
-    });
-
-    const ahora = new Date();
-    (empleado.rolesDirectos ?? []).forEach((asignacion) => {
-      const yaInicio = asignacion.fechaInicio <= ahora;
-      const sigueVigente = asignacion.fechaFin === null || asignacion.fechaFin > ahora;
-      if (yaInicio && sigueVigente && !ids.includes(asignacion.rolId)) {
-        ids.push(asignacion.rolId);
+        codigo: "ANALISTA_TI",
+        nombre: "Analista de tecnología",
+        descripcion: "Consulta información básica del personal"
       }
-    });
-    return ids;
-  }
+    ]
+  };
 
-  function registrarEvento(id, documento) {
-    iam.auditoria.updateOne(
-      { _id: id },
-      { $setOnInsert: { _id: id, ...documento } },
-      { upsert: true }
-    );
-  }
+  const aprobadorAsignado = {
+    legajo: "2001",
+    nombre: "Martín",
+    apellido: "Gómez",
+    email: "martin.gomez@ejemplo.com",
+    area: {
+      codigo: "RRHH",
+      nombre: "Recursos Humanos",
+      descripcion: "Administración del personal"
+    },
+    puesto: {
+      codigo: "JEFE_RRHH",
+      nombre: "Jefe de Recursos Humanos",
+      descripcion: "Puesto habilitado para aprobar accesos de RRHH"
+    },
+    rolesEfectivos: [
+      {
+        codigo: "APROBADOR_RRHH",
+        nombre: "Aprobador de Recursos Humanos",
+        descripcion: "Puede resolver solicitudes de acceso"
+      }
+    ]
+  };
 
-  function aplicarAccesoAprobado(solicitud) {
-    const empleados = iam.empleados;
-    const fechaDecision = solicitud.fechaCierre;
-
-    if (solicitud.tipo === "ALTA") {
-      const aprobador = solicitud.aprobaciones.find((paso) => paso.estado === "APROBADA");
-      empleados.updateOne(
-        { _id: solicitud.solicitanteId },
-        {
-          $addToSet: {
-            rolesDirectos: {
-              rolId: solicitud.rolSolicitadoId,
-              origen: "SOLICITUD",
-              solicitudOrigenId: solicitud._id,
-              asignadoPorId: aprobador.aprobadorId,
-              motivo: `Solicitud aprobada: ${solicitud._id}`,
-              fechaInicio: fechaDecision,
-              fechaFin: null
-            }
+  const rolAuditor = {
+    codigo: "AUDITOR",
+    nombre: "Auditor",
+    descripcion: "Consulta información de personal y reportes financieros",
+    activo: true,
+    aplicaciones: [
+      {
+        codigo: "RRHH",
+        nombre: "Gestión de personal",
+        descripcion: "Aplicación de recursos humanos",
+        activo: true,
+        permisos: [
+          {
+            codigo: "PERSONAL_LECTURA",
+            nombre: "Consultar personal",
+            descripcion: "Ver datos del personal",
+            activo: true
           }
-        }
-      );
-      return;
-    }
-
-    const rolQueFinaliza = solicitud.tipo === "BAJA"
-      ? solicitud.rolSolicitadoId
-      : solicitud.rolAnteriorId;
-    const empleadoAntes = requerido("empleados", solicitud.solicitanteId);
-    const yaFinalizado = (empleadoAntes.rolesDirectos ?? []).some(
-      (asignacion) => asignacion.rolId === rolQueFinaliza
-        && asignacion.fechaFin instanceof Date
-        && asignacion.fechaFin.getTime() === fechaDecision.getTime()
-    );
-    const resultado = empleados.updateOne(
-      {
-        _id: solicitud.solicitanteId,
-        rolesDirectos: {
-          $elemMatch: { rolId: rolQueFinaliza, fechaFin: null }
-        }
+        ]
       },
-      { $set: { "rolesDirectos.$[asignacion].fechaFin": fechaDecision } },
       {
-        arrayFilters: [
-          { "asignacion.rolId": rolQueFinaliza, "asignacion.fechaFin": null }
+        codigo: "FIN",
+        nombre: "Reportes financieros",
+        descripcion: "Aplicación de consulta financiera",
+        activo: true,
+        permisos: [
+          {
+            codigo: "REPORTES_LECTURA",
+            nombre: "Consultar reportes financieros",
+            descripcion: "Ver reportes financieros",
+            activo: true
+          }
         ]
       }
-    );
+    ]
+  };
 
-    if (resultado.modifiedCount === 0 && !yaFinalizado) {
-      throw new Error(
-        `No hay una asignación directa vigente de ${rolQueFinaliza} para ${solicitud.solicitanteId}.`
-      );
-    }
+  const rolConsultaFinanzas = {
+    codigo: "CONSULTA_FINANZAS",
+    nombre: "Consulta de finanzas",
+    descripcion: "Consulta reportes financieros",
+    activo: true,
+    aplicaciones: [
+      {
+        codigo: "FIN",
+        nombre: "Reportes financieros",
+        descripcion: "Aplicación de consulta financiera",
+        activo: true,
+        permisos: [
+          {
+            codigo: "REPORTES_LECTURA",
+            nombre: "Consultar reportes financieros",
+            descripcion: "Ver reportes financieros",
+            activo: true
+          }
+        ]
+      }
+    ]
+  };
 
-    if (solicitud.tipo === "MODIFICACION") {
-      const aprobador = solicitud.aprobaciones.find((paso) => paso.estado === "APROBADA");
-      empleados.updateOne(
-        { _id: solicitud.solicitanteId },
-        {
-          $addToSet: {
-            rolesDirectos: {
-              rolId: solicitud.rolSolicitadoId,
-              origen: "SOLICITUD",
-              solicitudOrigenId: solicitud._id,
-              asignadoPorId: aprobador.aprobadorId,
-              motivo: `Modificación aprobada: ${solicitud._id}`,
-              fechaInicio: fechaDecision,
-              fechaFin: null
+  iam.solicitudes.updateOne(
+    { _id: "SOL-DEMO-001" },
+    {
+      $setOnInsert: {
+        _id: "SOL-DEMO-001",
+        solicitante,
+        rolSolicitado: rolAuditor,
+        rolAnterior: null,
+        tipo: "ALTA",
+        estado: "EN_APROBACION",
+        motivo: "Necesito revisar reportes durante el control interno.",
+        fechaCreacion,
+        fechaCierre: null,
+        aprobaciones: [
+          {
+            numeroPaso: 1,
+            rolAprobador: {
+              codigo: "APROBADOR_RRHH",
+              nombre: "Aprobador de Recursos Humanos",
+              descripcion: "Puede resolver solicitudes de acceso"
+            },
+            aprobadorAsignado,
+            aprobador: null,
+            estado: "PENDIENTE",
+            fechaAsignacion: fechaCreacion,
+            fechaDecision: null,
+            comentario: null
+          }
+        ],
+        auditoria: [
+          {
+            actor: {
+              legajo: solicitante.legajo,
+              nombre: solicitante.nombre,
+              apellido: solicitante.apellido
+            },
+            accion: "SOLICITUD_CREADA",
+            fechaEvento: fechaCreacion,
+            detalle: {
+              tipo: "ALTA",
+              rolSolicitado: rolAuditor.nombre,
+              motivo: "Necesito revisar reportes durante el control interno."
+            }
+          }
+        ]
+      }
+    },
+    { upsert: true }
+  );
+
+  iam.solicitudes.updateOne(
+    { _id: "SOL-DEMO-002" },
+    {
+      $setOnInsert: {
+        _id: "SOL-DEMO-002",
+        solicitante,
+        rolSolicitado: rolConsultaFinanzas,
+        rolAnterior: null,
+        tipo: "ALTA",
+        estado: "EN_APROBACION",
+        motivo: "Necesito consultar los reportes financieros del proyecto.",
+        fechaCreacion,
+        fechaCierre: null,
+        aprobaciones: [
+          {
+            numeroPaso: 1,
+            rolAprobador: {
+              codigo: "APROBADOR_RRHH",
+              nombre: "Aprobador de Recursos Humanos",
+              descripcion: "Puede resolver solicitudes de acceso"
+            },
+            aprobadorAsignado,
+            aprobador: null,
+            estado: "PENDIENTE",
+            fechaAsignacion: fechaCreacion,
+            fechaDecision: null,
+            comentario: null
+          }
+        ],
+        auditoria: [
+          {
+            actor: {
+              legajo: solicitante.legajo,
+              nombre: solicitante.nombre,
+              apellido: solicitante.apellido
+            },
+            accion: "SOLICITUD_CREADA",
+            fechaEvento: fechaCreacion,
+            detalle: {
+              tipo: "ALTA",
+              rolSolicitado: rolConsultaFinanzas.nombre,
+              motivo: "Necesito consultar los reportes financieros del proyecto."
+            }
+          }
+        ]
+      }
+    },
+    { upsert: true }
+  );
+
+  const solicitud = iam.solicitudes.findOne({ _id: "SOL-DEMO-001" });
+  const paso = solicitud.aprobaciones[0];
+
+  if (solicitud.solicitante.legajo === paso.aprobadorAsignado.legajo) {
+    throw new Error("Una persona no puede aprobar su propia solicitud.");
+  }
+  let aprobadorAutorizado = false;
+  for (const rolEfectivo of paso.aprobadorAsignado.rolesEfectivos) {
+    if (rolEfectivo.codigo === paso.rolAprobador.codigo) aprobadorAutorizado = true;
+  }
+  if (!aprobadorAutorizado) {
+    throw new Error("El aprobador no tiene el rol requerido.");
+  }
+
+  if (solicitud.estado === "EN_APROBACION" && paso.estado === "PENDIENTE") {
+    const fechaDecision = new Date();
+    iam.solicitudes.updateOne(
+      {
+        _id: "SOL-DEMO-001",
+        estado: "EN_APROBACION",
+        aprobaciones: {
+          $elemMatch: { numeroPaso: 1, estado: "PENDIENTE" }
+        }
+      },
+      {
+        $set: {
+          estado: "APROBADA",
+          fechaCierre: fechaDecision,
+          "aprobaciones.$[paso].estado": "APROBADA",
+          "aprobaciones.$[paso].aprobador": paso.aprobadorAsignado,
+          "aprobaciones.$[paso].fechaDecision": fechaDecision,
+          "aprobaciones.$[paso].comentario": "Aprobado para la tarea de auditoría."
+        },
+        $push: {
+          auditoria: {
+            actor: {
+              legajo: paso.aprobadorAsignado.legajo,
+              nombre: paso.aprobadorAsignado.nombre,
+              apellido: paso.aprobadorAsignado.apellido
+            },
+            accion: "SOLICITUD_APROBADA",
+            fechaEvento: fechaDecision,
+            detalle: {
+              numeroPaso: 1,
+              comentario: "Aprobado para la tarea de auditoría."
             }
           }
         }
-      );
-    }
-  }
-
-  function aprobarPaso(solicitudId, numeroPaso, aprobadorId, comentario) {
-    let solicitud = requerido("solicitudes", solicitudId);
-    const aprobador = requerido("empleados", aprobadorId);
-    requerido("roles", solicitud.rolSolicitadoId);
-
-    if (solicitud.solicitanteId === aprobadorId) {
-      throw new Error("Una persona no puede aprobar su propia solicitud.");
-    }
-
-    const paso = solicitud.aprobaciones.find(
-      (item) => Number(item.paso) === numeroPaso
+      },
+      { arrayFilters: [{ "paso.numeroPaso": 1, "paso.estado": "PENDIENTE" }] }
     );
-    if (!paso) throw new Error(`No existe el paso ${numeroPaso} en ${solicitudId}.`);
-    const rolesDelAprobador = rolesEfectivos(aprobador);
-
-    if (!rolesDelAprobador.includes(paso.rolAprobadorId)) {
-      throw new Error(
-        `${aprobadorId} no tiene el rol requerido ${paso.rolAprobadorId}.`
-      );
-    }
-
-    if (paso.estado === "PENDIENTE") {
-      const fechaDecision = new Date();
-      const resultado = iam.solicitudes.updateOne(
-        {
-          _id: solicitudId,
-          estado: "EN_APROBACION",
-          aprobaciones: {
-            $elemMatch: { paso: numeroPaso, estado: "PENDIENTE" }
-          }
-        },
-        {
-          $set: {
-            "aprobaciones.$[paso].estado": "APROBADA",
-            "aprobaciones.$[paso].aprobadorId": aprobadorId,
-            "aprobaciones.$[paso].fechaDecision": fechaDecision,
-            "aprobaciones.$[paso].comentario": comentario
-          }
-        },
-        {
-          arrayFilters: [
-            { "paso.paso": numeroPaso, "paso.estado": "PENDIENTE" }
-          ]
-        }
-      );
-
-      if (resultado.modifiedCount !== 1) {
-        throw new Error(`No se pudo registrar la aprobación de ${solicitudId}.`);
-      }
-
-      solicitud = requerido("solicitudes", solicitudId);
-      const todosAprobaron = solicitud.aprobaciones.every(
-        (item) => item.estado === "APROBADA"
-      );
-
-      if (todosAprobaron) {
-        iam.solicitudes.updateOne(
-          { _id: solicitudId, estado: "EN_APROBACION" },
-          { $set: { estado: "APROBADA", fechaCierre: fechaDecision } }
-        );
-        solicitud = requerido("solicitudes", solicitudId);
-        aplicarAccesoAprobado(solicitud);
-      }
-
-      registrarEvento(`AUD-${solicitudId}-PASO-${numeroPaso}`, {
-        actorId: aprobadorId,
-        solicitudId,
-        objetoTipo: "APROBACION",
-        objetoId: `${solicitudId}-PASO-${numeroPaso}`,
-        accion: "SOLICITUD_APROBADA",
-        fechaEvento: fechaDecision,
-        detalle: { numeroPaso, comentario }
-      });
-      print(`Paso ${numeroPaso} aprobado por ${aprobadorId}.`);
-      return;
-    }
-
-    if (paso.estado === "APROBADA" && solicitud.estado === "APROBADA") {
-      // Permite volver a correr el archivo sin duplicar la asignación del rol.
-      aplicarAccesoAprobado(solicitud);
-      print(`La solicitud ${solicitudId} ya estaba aprobada.`);
-      return;
-    }
-
-    print(`La solicitud ${solicitudId} no tiene un paso pendiente para aprobar.`);
+    print("SOL-DEMO-001 aprobada por Martín Gómez (2001).");
   }
 
-  function crearSolicitud({ id, solicitanteId, rolId, motivo }) {
-    requerido("empleados", solicitanteId);
-    const rol = requerido("roles", rolId);
-    if (!rol.activo) throw new Error(`El rol ${rolId} está inactivo.`);
-
-    const fechaCreacion = new Date();
-    crearSolicitudSiFalta({
-      _id: id,
-      solicitanteId,
-      rolSolicitadoId: rolId,
-      rolAnteriorId: null,
-      tipo: "ALTA",
-      estado: "EN_APROBACION",
-      motivo,
-      fechaCreacion,
-      fechaCierre: null,
-      aprobaciones: [
-        {
-          paso: NumberInt(1),
-          rolAprobadorId: "ROL_APROBADOR_RRHH",
-          aprobadorId: null,
-          estado: "PENDIENTE",
-          fechaAsignacion: fechaCreacion,
-          fechaDecision: null,
-          comentario: null
+  const solicitudAprobada = iam.solicitudes.findOne({ _id: "SOL-DEMO-001" });
+  if (solicitudAprobada.estado === "APROBADA") {
+    iam.empleados.updateOne(
+      { _id: solicitudAprobada.solicitante.legajo },
+      {
+        $addToSet: {
+          rolesDirectos: {
+            rol: solicitudAprobada.rolSolicitado,
+            origen: "SOLICITUD",
+            motivo: `Solicitud aprobada: ${solicitudAprobada.motivo}`,
+            asignadoPor: solicitudAprobada.aprobaciones[0].aprobador,
+            fechaInicio: solicitudAprobada.fechaCierre,
+            fechaFin: null
+          }
         }
-      ]
-    });
+      }
+    );
   }
 
-  // Dos pedidos: uno será aprobado y el otro quedará pendiente para las consultas.
-  crearSolicitud({
-    id: "SOL-DEMO-001",
-    solicitanteId: "EMP-0001",
-    rolId: "ROL_AUDITOR",
-    motivo: "Necesito revisar reportes durante el control interno."
-  });
-  crearSolicitud({
-    id: "SOL-DEMO-002",
-    solicitanteId: "EMP-0001",
-    rolId: "ROL_CONSULTA_FIN",
-    motivo: "Necesito consultar los reportes financieros del proyecto."
-  });
-
-  // El empleado EMP-0002 hereda el rol aprobador desde su puesto.
-  aprobarPaso(
-    "SOL-DEMO-001",
-    1,
-    "EMP-0002",
-    "Aprobado para la tarea de auditoría."
-  );
-
-  print("\nSolicitudes pendientes:");
+  print("\nSolicitudes pendientes (cada resultado contiene sus datos relacionados):");
   printjson(
     iam.solicitudes.find(
       { estado: { $in: ["PENDIENTE", "EN_APROBACION"] } },
-      { _id: 1, solicitanteId: 1, rolSolicitadoId: 1, estado: 1 }
+      { _id: 1, solicitante: 1, rolSolicitado: 1, aprobaciones: 1, estado: 1 }
     ).toArray()
   );
 
-  const empleado = requerido("empleados", "EMP-0001");
-  const idsRoles = rolesEfectivos(empleado);
-  const roles = iam.roles.find({ _id: { $in: idsRoles }, activo: true }).toArray();
-  const accesos = [];
-
-  for (const rol of roles) {
-    for (const referencia of rol.permisos) {
-      const aplicacion = iam.aplicaciones.findOne({ _id: referencia.aplicacionId });
-      if (!aplicacion || !aplicacion.activo) continue;
-
-      let permiso = null;
-      for (const item of aplicacion.permisos) {
-        if (item.permisoId === referencia.permisoId && item.activo) {
-          permiso = item;
-          break;
+  print("\nAccesos efectivos de Lucía Pérez (consulta sobre un documento de empleado):");
+  printjson(
+    iam.empleados.aggregate([
+      { $match: { _id: "1001" } },
+      {
+        $project: {
+          nombreEmpleado: { $concat: ["$nombre", " ", "$apellido"] },
+          roles: {
+            $concatArrays: [
+              "$puesto.roles",
+              {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: "$rolesDirectos",
+                      as: "asignacion",
+                      cond: {
+                        $and: [
+                          { $lte: ["$$asignacion.fechaInicio", new Date()] },
+                          {
+                            $or: [
+                              { $eq: ["$$asignacion.fechaFin", null] },
+                              { $gt: ["$$asignacion.fechaFin", new Date()] }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  as: "asignacion",
+                  in: "$$asignacion.rol"
+                }
+              }
+            ]
+          }
+        }
+      },
+      { $unwind: "$roles" },
+      { $unwind: "$roles.aplicaciones" },
+      { $unwind: "$roles.aplicaciones.permisos" },
+      {
+        $match: {
+          "roles.activo": true,
+          "roles.aplicaciones.activo": true,
+          "roles.aplicaciones.permisos.activo": true
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          empleado: "$nombreEmpleado",
+          rol: "$roles.nombre",
+          aplicacion: "$roles.aplicaciones.nombre",
+          permiso: "$roles.aplicaciones.permisos.nombre"
         }
       }
-
-      if (permiso) {
-        accesos.push({
-          rol: rol.nombre,
-          aplicacion: aplicacion.nombre,
-          permiso: permiso.nombre
-        });
-      }
-    }
-  }
-
-  print("\nAccesos efectivos de EMP-0001:");
-  printjson(accesos);
-
-  print("\nHistorial de auditoría de SOL-DEMO-001:");
-  printjson(
-    iam.auditoria.find({ solicitudId: "SOL-DEMO-001" })
-      .sort({ fechaEvento: 1 })
-      .toArray()
+    ]).toArray()
   );
+
+  print("\nAuditoría embebida en SOL-DEMO-001:");
+  printjson(iam.solicitudes.findOne({ _id: "SOL-DEMO-001" }, { _id: 1, auditoria: 1 }));
 })();

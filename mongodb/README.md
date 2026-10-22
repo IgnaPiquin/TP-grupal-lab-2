@@ -1,40 +1,41 @@
 # Implementación MongoDB: gestor de identidades y accesos
 
-Esta carpeta contiene una implementación de ejemplo del caso IAM con MongoDB y `mongosh`.
+Esta carpeta contiene una implementación de ejemplo de IAM modelada con agregados documentales y ejecutable con `mongosh`.
 
-## Modelo de documentos
+## Modelo documental
 
-| Colección | Contenido y relaciones |
-|---|---|
-| `areas` | Sectores de la organización. Los empleados guardan una referencia `areaId`. |
-| `puestos` | Puestos y una lista de referencias `roles` para representar la relación puesto-rol. |
-| `roles` | Roles y referencias a permisos por aplicación. |
-| `aplicaciones` | Aplicaciones con sus permisos como subdocumentos. |
-| `empleados` | Datos del empleado, referencias a área y puesto, y asignaciones directas de roles como subdocumentos. |
-| `solicitudes` | Una solicitud por empleado y rol; las etapas de aprobación se guardan dentro de la solicitud. |
-| `auditoria` | Eventos independientes para conservar un historial que puede crecer con el tiempo. |
+Se usan dos colecciones como raíces de agregados:
 
-El diseño combina referencias para entidades compartidas y arrays de referencias para relaciones de varios a varios. Los pasos de aprobación se embeben en `solicitudes` porque forman parte del flujo de una solicitud y suelen consultarse con ella. La validación `$jsonSchema` controla la forma y los tipos de los documentos; la existencia de las referencias, la unicidad de campos como el email y reglas como impedir la autoaprobación se verifican en las operaciones de la aplicación. La única clave única incluida automáticamente es `_id`.
+| Colección | Datos embebidos | Consulta que resuelve |
+|---|---|---|
+| `empleados` | Datos del empleado, área, puesto, roles heredados por el puesto y asignaciones directas. Cada rol contiene sus aplicaciones y permisos. | Conocer en una lectura el perfil y los accesos vigentes de una persona. |
+| `solicitudes` | Copia contextual del solicitante, rol pedido y sus aplicaciones y permisos, responsable y rol de aprobación, pasos de aprobación y eventos de auditoría. | Consultar o modificar una solicitud con toda la información necesaria en el mismo documento. |
 
-No se crean índices explícitos en estos scripts.
+`Área`, `Puesto`, `Rol`, `Aplicación`, `Permiso`, `Aprobación` y `Auditoría` son subdocumentos donde corresponden; no se crean colecciones de catálogo que deban consultarse para completar otra entidad. Los documentos no contienen referencias como `areaId`, `puestoId`, `rolId`, `aplicacionId`, `solicitanteId` o `aprobadorId`, y las consultas no usan `$lookup`.
+
+Cada documento incluye su propio `_id`. El `legajo` aparece como dato completo de la persona embebida en la solicitud; al aprobarla se usa como clave natural para actualizar el agregado del empleado. La solicitud ya contiene el contexto del solicitante y no se consulta otra colección para enriquecerla.
+
+Se duplican snapshots de roles y datos organizacionales en los agregados que los necesitan. Así se evita reconstruir relaciones mediante consultas, a cambio de tener que actualizar las copias cuando cambia el catálogo. La aprobación y sus eventos son acotados dentro de cada solicitud; el historial no se adjunta entero a cada empleado.
+
+Los validadores `$jsonSchema` controlan estructura y tipos. No reemplazan todas las reglas de negocio. Los scripts no crean índices explícitos; MongoDB crea automáticamente el índice propio de `_id`.
 
 ## Requisitos
 
-- Un servidor MongoDB accesible. Para la configuración local, el ejemplo usa `mongodb://127.0.0.1:27017`.
-- `mongosh`, la consola que ejecuta los archivos `.js`.
+- Un servidor MongoDB accesible y `mongosh`.
+- La base de ejemplo se llama `gestor_accesos_iam_embebido` y usa `mongodb://127.0.0.1:27017`.
 
-`mongosh` es el cliente; por sí solo no inicia el servidor de base de datos. En el equipo donde se preparó y ejecutó esta implementación, el servidor MongoDB 8.3.7 está en `C:\Program Files\MongoDB\Server\8.3\bin\mongod.exe` y `mongosh` 2.9.2 está disponible en el `PATH`.
+`mongosh` es el cliente; no inicia el servidor. En el equipo donde se ejecutó esta implementación, el servidor MongoDB está en `C:\Program Files\MongoDB\Server\8.3\bin\mongod.exe` y `mongosh` está disponible en el `PATH`. Ajustar la ruta si la versión está instalada en otro directorio.
 
 ## Ejecución local
 
-Para iniciar una instancia local de prueba en PowerShell, abrir una primera terminal y ejecutar:
+En una primera terminal de PowerShell, iniciar el servidor de prueba:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:TEMP\iam-mongodb-data" | Out-Null
 & "C:\Program Files\MongoDB\Server\8.3\bin\mongod.exe" --dbpath "$env:TEMP\iam-mongodb-data" --bind_ip 127.0.0.1 --port 27017
 ```
 
-Dejar esa terminal abierta. Desde la raíz del repositorio, en una segunda terminal, ejecutar:
+Dejarla abierta. Desde la raíz del repositorio, ejecutar en una segunda terminal:
 
 ```powershell
 mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\01_crear_estructura.js
@@ -42,15 +43,8 @@ mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\02_cargar_datos_demo.js
 mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\03_operaciones.js
 ```
 
-Los tres archivos trabajan con la base `gestor_accesos_iam`. La estructura actualiza validadores si las colecciones ya existen y no elimina datos; la carga crea los documentos de ejemplo que falten; las operaciones conservan el estado de las solicitudes de demostración al volver a ejecutarse.
+`01_crear_estructura.js` crea o actualiza los validadores de las dos colecciones. `02_cargar_datos_demo.js` reemplaza los dos empleados demo y los devuelve a su estado inicial. `03_operaciones.js` crea las solicitudes demo si faltan, aprueba la primera, actualiza el rol del empleado y ejecuta consultas sobre cada agregado.
 
-La ejecución de los tres scripts se verificó localmente. Los resultados y el alcance de esa verificación están en [`benchmarking.md`](benchmarking.md).
+La ejecución se verificó localmente en MongoDB 8.3.7 y `mongosh` 2.9.2. Los resultados y la comparación con Oracle están en [`benchmarking.md`](benchmarking.md).
 
-Si usan MongoDB Atlas u otro servidor, reemplacen la URI local por la URI del entorno y no guarden contraseñas ni cadenas privadas en el repositorio.
-
-## Archivos
-
-- `01_crear_estructura.js`: crea colecciones y validadores de documentos.
-- `02_cargar_datos_demo.js`: carga empleados, áreas, puestos, roles, aplicaciones y permisos de ejemplo.
-- `03_operaciones.js`: crea solicitudes, valida una aprobación, otorga el rol aprobado y consulta solicitudes, accesos efectivos y auditoría.
-- `benchmarking.md`: comparación del modelo documental con el modelo relacional del archivo `../01_modelo_iam.sql`.
+Si usan MongoDB Atlas u otro servidor, reemplacen la URI local y no guarden contraseñas ni cadenas privadas en el repositorio.
