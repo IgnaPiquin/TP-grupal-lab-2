@@ -16,7 +16,7 @@ BEGIN
 
     COMMIT;
 END;
-
+/
 
 -- 2. Consulta de permisos efectivos consolidados (UNION de heredados + directos)
 SELECT e.nombre || ' ' || e.apellido AS empleado, r.nombre AS rol, a.nombre AS aplicacion, p.nombre AS permiso
@@ -38,6 +38,7 @@ JOIN rol_permiso rp ON r.rol_id = rp.rol_id
 JOIN permiso p ON rp.permiso_id = p.permiso_id
 JOIN aplicacion a ON p.aplicacion_id = a.aplicacion_id
 WHERE e.empleado_id = 1 AND (er.fecha_fin IS NULL OR er.fecha_fin >= SYSDATE);
+/
 
 -- 3. Procedimiento almacenado para aprobar una solicitud con manejo de errores y excepciones
 CREATE OR REPLACE PROCEDURE pr_aprobar_solicitud (
@@ -134,5 +135,179 @@ BEGIN
     END LOOP;
     
     DBMS_OUTPUT.PUT_LINE('--------------------------------------------------');
+END;
+/
+
+-- 5.Función: Validar Permisos de un Empleado
+CREATE OR REPLACE FUNCTION fu_empleado_tiene_permiso (
+    p_empleado_id    IN NUMBER,
+    p_codigo_permiso IN VARCHAR2
+) RETURN CHAR IS
+    v_resultado NUMBER := 0;
+    v_tiene     CHAR(1) := 'N';
+BEGIN
+    -- Busca en permisos heredados por puesto o asignados directamente
+    SELECT COUNT(*)
+    INTO v_resultado
+    FROM (
+        -- Permisos por Puesto
+        SELECT p.codigo
+        FROM empleado e
+        JOIN puesto_rol pr ON e.puesto_id = pr.puesto_id
+        JOIN rol_permiso rp ON pr.rol_id = rp.rol_id
+        JOIN permiso p ON rp.permiso_id = p.permiso_id
+        WHERE e.empleado_id = p_empleado_id 
+          AND (pr.fecha_hasta IS NULL OR pr.fecha_hasta >= SYSDATE)
+        
+        UNION
+        
+        -- Permisos Directos / por Solicitud
+        SELECT p.codigo
+        FROM empleado e
+        JOIN empleado_rol er ON e.empleado_id = er.empleado_id
+        JOIN rol_permiso rp ON er.rol_id = rp.rol_id
+        JOIN permiso p ON rp.permiso_id = p.permiso_id
+        WHERE e.empleado_id = p_empleado_id 
+          AND (er.fecha_fin IS NULL OR er.fecha_fin >= SYSDATE)
+    )
+    WHERE codigo = p_codigo_permiso;
+
+    IF v_resultado > 0 THEN
+        v_tiene := 'S';
+    ELSE
+        v_tiene := 'N';
+    END IF;
+
+    RETURN v_tiene;
+END fu_empleado_tiene_permiso;
+/
+
+-- 5.1 Bloque anónimo para probar la función de validación de permisos
+SET SERVEROUTPUT ON;
+BEGIN
+    IF fu_empleado_tiene_permiso(1, 'REPORTES_LECTURA') = 'S' THEN
+        DBMS_OUTPUT.PUT_LINE('El empleado 1 TIENE acceso al reporte financiero.');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('El empleado 1 NO TIENE acceso al reporte financiero.');
+    END IF;
+END;
+/
+
+-- 6. Paquete PL/SQL pkg_gestion_iam
+-- 6.1 Declaración del paquete
+CREATE OR REPLACE PACKAGE pkg_gestion_iam AS
+    -- Procedimiento público para aprobar solicitudes
+    PROCEDURE pr_aprobar_solicitud (
+        p_solicitud_id   IN NUMBER,
+        p_aprobador_id   IN NUMBER,
+        p_comentario     IN VARCHAR2
+    );
+
+    -- Función pública para validar permisos
+    FUNCTION fu_empleado_tiene_permiso (
+        p_empleado_id    IN NUMBER,
+        p_codigo_permiso IN VARCHAR2
+    ) RETURN CHAR;
+END pkg_gestion_iam;
+/
+
+CREATE OR REPLACE PACKAGE pkg_gestion_iam AS
+    -- Procedimiento público para aprobar solicitudes
+    PROCEDURE pr_aprobar_solicitud (
+        p_solicitud_id   IN NUMBER,
+        p_aprobador_id   IN NUMBER,
+        p_comentario     IN VARCHAR2
+    );
+
+    -- Función pública para validar permisos
+    FUNCTION fu_empleado_tiene_permiso (
+        p_empleado_id    IN NUMBER,
+        p_codigo_permiso IN VARCHAR2
+    ) RETURN CHAR;
+END pkg_gestion_iam;
+/
+
+-- 6.2 Cuerpo del paquete
+CREATE OR REPLACE PACKAGE BODY pkg_gestion_iam AS
+
+    PROCEDURE pr_aprobar_solicitud (
+        p_solicitud_id   IN NUMBER,
+        p_aprobador_id   IN NUMBER,
+        p_comentario     IN VARCHAR2
+    ) AS
+        e_solicitud_no_encontrada EXCEPTION;
+        v_contador NUMBER;
+        v_empleado_id NUMBER;
+        v_rol_id NUMBER;
+    BEGIN
+        SELECT COUNT(*), MAX(solicitante_id), MAX(rol_solicitado_id)
+        INTO v_contador, v_empleado_id, v_rol_id
+        FROM solicitud
+        WHERE solicitud_id = p_solicitud_id AND estado = 'PENDIENTE';
+
+        IF v_contador = 0 THEN
+            RAISE e_solicitud_no_encontrada;
+        END IF;
+
+        UPDATE aprobacion
+        SET estado = 'APROBADA', 
+            aprobador_id = p_aprobador_id, 
+            fecha_decision = SYSTIMESTAMP, 
+            comentario = p_comentario
+        WHERE solicitud_id = p_solicitud_id AND numero_paso = 1;
+
+        UPDATE solicitud 
+        SET estado = 'APROBADA', 
+            fecha_cierre = SYSTIMESTAMP 
+        WHERE solicitud_id = p_solicitud_id;
+
+        INSERT INTO empleado_rol (empleado_id, rol_id, origen, solicitud_origen_id, asignado_por_id, motivo)
+        VALUES (v_empleado_id, v_rol_id, 'SOLICITUD', p_solicitud_id, p_aprobador_id, p_comentario);
+
+        INSERT INTO log_auditoria (actor_id, solicitud_id, objeto_tipo, id_registro, accion, detalle)
+        VALUES (p_aprobador_id, p_solicitud_id, 'SOLICITUD', p_solicitud_id, 'SOLICITUD_APROBADA_PKG', 'Aprobada mediante paquete PL/SQL.');
+
+        COMMIT;
+    EXCEPTION
+        WHEN e_solicitud_no_encontrada THEN
+            RAISE_APPLICATION_ERROR(-20001, 'Error: La solicitud ID ' || p_solicitud_id || ' no existe o no está pendiente.');
+        WHEN OTHERS THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20002, 'Error inesperado: ' || SQLERRM);
+    END pr_aprobar_solicitud;
+
+    FUNCTION fu_empleado_tiene_permiso (
+        p_empleado_id    IN NUMBER,
+        p_codigo_permiso IN VARCHAR2
+    ) RETURN CHAR IS
+        v_resultado NUMBER := 0;
+        v_tiene     CHAR(1) := 'N';
+    BEGIN
+        SELECT COUNT(*)
+        INTO v_resultado
+        FROM (
+            SELECT p.codigo FROM empleado e JOIN puesto_rol pr ON e.puesto_id = pr.puesto_id JOIN rol_permiso rp ON pr.rol_id = rp.rol_id JOIN permiso p ON rp.permiso_id = p.permiso_id WHERE e.empleado_id = p_empleado_id AND (pr.fecha_hasta IS NULL OR pr.fecha_hasta >= SYSDATE)
+            UNION
+            SELECT p.codigo FROM empleado e JOIN empleado_rol er ON e.empleado_id = er.empleado_id JOIN rol_permiso rp ON er.rol_id = rp.rol_id JOIN permiso p ON rp.permiso_id = p.permiso_id WHERE e.empleado_id = p_empleado_id AND (er.fecha_fin IS NULL OR er.fecha_fin >= SYSDATE)
+        )
+        WHERE codigo = p_codigo_permiso;
+
+        IF v_resultado > 0 THEN v_tiene := 'S'; END IF;
+        RETURN v_tiene;
+    END fu_empleado_tiene_permiso;
+
+END pkg_gestion_iam;
+/
+
+-- 6.3 Bloque anónimo para probar el paquete
+SET SERVEROUTPUT ON;
+BEGIN
+    -- Llamada al procedimiento dentro del paquete
+    pkg_gestion_iam.pr_aprobar_solicitud(1, 2, 'Aprobado vía package.');
+    
+    -- Llamada a la función dentro del paquete
+    IF pkg_gestion_iam.fu_empleado_tiene_permiso(1, 'PERSONAL_LECTURA') = 'S' THEN
+        DBMS_OUTPUT.PUT_LINE('Acceso permitido.');
+    END IF;
 END;
 /
