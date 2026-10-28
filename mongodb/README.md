@@ -41,10 +41,16 @@ Dejarla abierta. Desde la raíz del repositorio, ejecutar en una segunda termina
 mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\01_crear_estructura.js
 mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\02_cargar_datos_demo.js
 mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\03_operaciones.js
+mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\04_datos_benchmark.js
+mongosh "mongodb://127.0.0.1:27017" --file .\mongodb\05_benchmark_consultas.js
 ```
 
 `01_crear_estructura.js` crea o actualiza los validadores de las dos colecciones. `02_cargar_datos_demo.js` reemplaza los dos empleados demo y los devuelve a su estado inicial. `03_operaciones.js` crea las solicitudes demo si faltan, aprueba la primera, actualiza el rol del empleado y ejecuta consultas sobre cada agregado.
 
-La ejecución se verificó localmente en MongoDB 8.3.7 y `mongosh` 2.9.2. Los resultados y la comparación con Oracle están en [`benchmarking.md`](benchmarking.md).
+`04_datos_benchmark.js` agrega, mediante reemplazos idempotentes, 5.000 empleados y 5.000 solicitudes sintéticas. Los roles, permisos, áreas, puestos, solicitantes y responsables están embebidos en los agregados. `05_benchmark_consultas.js` ejecuta cinco veces las dos consultas comparables con Oracle e informa los conteos y milisegundos observados.
+
+La ejecución se verificó localmente en MongoDB 8.3.7 y `mongosh` 2.9.2. Los resultados, la metodología y sus límites están en [`benchmarking.md`](benchmarking.md).
+
+Los archivos `.js` se ejecutan dentro de `mongosh`, que es la consola oficial de MongoDB. No implementan una aplicación o servicio externo en JavaScript.
 
 Si usan MongoDB Atlas u otro servidor, reemplacen la URI local y no guarden contraseñas ni cadenas privadas en el repositorio.

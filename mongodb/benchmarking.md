@@ -1,82 +1,54 @@
-# Benchmarking: MongoDB documental y Oracle relacional
+# Benchmark de consultas entre MongoDB y Oracle
 
-## Alcance
+## Qué se midió
 
-La consigna pide comparar paradigmas. Este análisis contrasta el modelo documental de MongoDB con el modelo relacional de Oracle del archivo `../01_modelo_iam.sql`, aplicado al caso de gestión de identidades y accesos.
+Se compararon dos lecturas representativas del gestor IAM con 5.000 empleados sintéticos y 5.000 solicitudes sintéticas en cada motor:
 
-La aclaración de la cátedra indica priorizar documentos embebidos y evitar completar entidades consultando otras colecciones por identificadores. Por eso, la versión MongoDB usa dos agregados autocontenidos: `empleados` y `solicitudes`. No se presentan tiempos de rendimiento: Oracle tiene el esquema, pero todavía no se ejecutó allí una carga equivalente de datos y operaciones.
+1. Accesos efectivos por empleado: roles heredados del puesto y asignaciones directas, expandidos hasta aplicación y permiso.
+2. Detalle de solicitudes pendientes: solicitud, solicitante, rol pedido, aprobación, aprobador y permisos incluidos en el rol.
 
-## Modelo MongoDB alineado con la cátedra
+Los scripts cuentan las filas producidas para obligar a recorrer el resultado completo. En ambos motores las cardinalidades coincidieron: 12.500 combinaciones empleado/rol/aplicación/permiso y 7.500 combinaciones solicitud/aplicación/permiso.
 
-- En `empleados`, el área, el puesto, los roles del puesto, las aplicaciones y sus permisos están embebidos. Una lectura del empleado permite calcular sus accesos sin consultar colecciones adicionales.
-- En `solicitudes`, se embeben los datos del solicitante, el rol solicitado con sus aplicaciones y permisos, la persona responsable de aprobar, los pasos de aprobación y los eventos de auditoría.
-- Las entidades compartidas se copian como snapshots dentro de los agregados donde se necesitan. Las consultas no usan referencias por `*_id` ni `$lookup` para obtener información relacionada.
-- `_id` identifica el documento raíz. El `legajo` embebido identifica a la persona en el dominio; al aprobar una solicitud se utiliza para actualizar su agregado, sin buscar allí datos para completar la solicitud.
+## Carga equivalente
 
-## Resultado de la ejecución funcional
+La carga sintética alterna dos perfiles. En 2.500 empleados, el puesto aporta el rol `ANALISTA_TI` con un permiso y la asignación directa aporta `AUDITOR` con dos permisos. En los otros 2.500, el puesto aporta `APROBADOR_RRHH` con un permiso y la asignación directa aporta `CONSULTA_FINANZAS` con uno. Cada solicitud queda pendiente, pide el rol de auditoría o finanzas correspondiente y tiene un único paso pendiente asignado al rol aprobador.
 
-Se ejecutaron los tres scripts en un servidor local MongoDB 8.3.7, con `mongosh` 2.9.2 en Windows x64 y la base `gestor_accesos_iam_embebido`.
+En Oracle esto ocupa 5.000 filas en cada una de `EMPLEADO`, `EMPLEADO_ROL`, `SOLICITUD` y `APROBACION`. En MongoDB cada empleado y cada solicitud es un agregado autocontenido. Para que los filtros sean equivalentes, los documentos MongoDB también guardan el estado activo del solicitante y del aprobador.
 
-| Operación | Resultado observado |
-|---|---|
-| Creación de estructura | Se crearon las colecciones `empleados` y `solicitudes`, con validadores `$jsonSchema`. |
-| Carga demo | 2 empleados con área, puesto y roles embebidos; permisos y aplicaciones están anidados dentro de cada rol. |
-| Solicitudes | Se almacenaron 2 solicitudes autocontenidas, con datos del solicitante y aprobador incluidos. |
-| Aprobación | `SOL-DEMO-001` fue aprobada por Martín Gómez, cuyo rol aprobador está embebido en el paso. El rol solicitado se agregó a los accesos directos de Lucía Pérez. |
-| Consulta de pendientes | `SOL-DEMO-002` quedó en estado `EN_APROBACION` y el resultado contiene solicitante, rol y responsable. |
-| Consulta de accesos | La agregación sobre el documento de Lucía devolvió 3 permisos efectivos, incluidos los heredados del puesto y los del rol aprobado. |
-| Auditoría | Hay 3 eventos embebidos: creación de las dos solicitudes y aprobación de la primera. |
+Los identificadores de benchmark están separados de los dos registros de demostración. El script Oracle se ejecuta una vez sobre el esquema recién cargado; el script MongoDB usa `replaceOne` con `upsert`, de modo que puede repetirse sin duplicar documentos.
 
-Esta ejecución verifica que la estructura y las operaciones funcionan sin enriquecer documentos mediante búsquedas en otras colecciones. No mide latencia ni permite concluir qué motor es más rápido.
+## Resultados funcionales y de rendimiento
 
-## Comparación
+Las mediciones se hicieron el 28 de octubre de 2026. En Oracle APEX se ejecutó cinco veces el script `TP IAM - 05 benchmark consultas`. La columna `ELAPSED` de APEX muestra segundos con dos decimales; se convierten a milisegundos en la tabla. En MongoDB se ejecutó cinco veces cada agregación desde `mongosh`, cronometrando con `Date.now()` desde antes de `aggregate()` hasta que `toArray()` recibió el resultado.
 
-| Criterio | MongoDB documental | Oracle relacional | Efecto para el caso IAM |
-|---|---|---|---|
-| Organización | `empleados` guarda juntos el perfil y los accesos; `solicitudes` guarda juntos su solicitante, rol, aprobaciones y eventos. | Las entidades se distribuyen en tablas relacionadas por claves. | MongoDB consulta cada agregado sin reconstruir sus datos con uniones. Oracle mantiene cada entidad compartida en un único lugar. |
-| Área y puesto | Se embeben dentro del documento del empleado. | `empleado` referencia `area` y `puesto`. | El perfil MongoDB está disponible con una lectura; Oracle evita repetir datos organizacionales. |
-| Roles, aplicaciones y permisos | Aplicaciones y permisos se anidan en el rol, que se copia en el agregado del empleado o la solicitud que lo necesita. | Se representan con tablas y relaciones como `puesto_rol` y `rol_permiso`. | MongoDB favorece consultas completas del agregado; Oracle facilita administrar un catálogo central sin copias divergentes. |
-| Aprobaciones y auditoría | Se embeben dentro de la solicitud y se consultan junto con sus datos. | `aprobacion` y `log_auditoria` son tablas separadas vinculadas a `solicitud`. | El flujo completo se obtiene desde un documento MongoDB; Oracle permite consultar eventos y aprobaciones por separado. |
-| Integridad | `$jsonSchema` valida tipos y estructura. Las reglas de negocio y consistencia entre snapshots dependen de las operaciones de la aplicación. | Claves primarias, foráneas y restricciones controlan relaciones y valores. | Oracle ofrece más integridad declarativa; MongoDB evita referencias colgantes en estos agregados al guardar subdocumentos completos. |
-| Actualización | Un cambio de catálogo puede requerir actualizar snapshots en varios agregados. | Un cambio en la entidad compartida se realiza en una fila central. | MongoDB simplifica las lecturas a costa de más duplicación y trabajo de actualización. |
+| Caso | Filas Oracle | Oracle: 5 ejecuciones (ms) | Mediana Oracle y rango (ms) | Filas MongoDB | MongoDB: 5 ejecuciones (ms) | Mediana MongoDB y rango (ms) |
+|---|---:|---|---:|---:|---|---:|
+| Accesos efectivos | 12.500 | 290, 140, 20, 30, 20 | 30 (20-290) | 12.500 | 172, 189, 216, 211, 203 | 203 (172-216) |
+| Solicitudes pendientes | 7.500 | 130, 100, 10, 10, 10 | 10 (10-130) | 7.500 | 109, 113, 107, 117, 110 | 110 (107-117) |
 
-## Ventajas y desventajas
+En las ejecuciones observadas, la mediana reportada por APEX fue menor para las dos consultas. Sin embargo, los intervalos de las primeras ejecuciones Oracle son amplios y las dos mediciones no usan el mismo entorno ni exactamente el mismo cronómetro. Estos datos permiten describir lo observado en esta prueba, pero no demostrar que un motor sea más rápido en general.
 
-### MongoDB
+## Límites de la comparación
 
-**Ventajas**
+- Oracle corre en el servicio hospedado Oracle APEX; MongoDB 8.3.7 corre localmente en Windows y se accede por loopback con `mongosh` 2.9.2. La capacidad del servidor Oracle y la del equipo local no están igualadas.
+- Oracle APEX informa el tiempo de sus sentencias SQL en segundos redondeados a centésimas. MongoDB informa milisegundos enteros medidos en el cliente `mongosh`, incluido el viaje local entre cliente y servidor.
+- Se hicieron cinco ejecuciones por consulta. Las primeras observaciones Oracle fueron considerablemente más lentas que las siguientes, por lo que caché, calentamiento y carga variable del servicio pueden influir.
+- La prueba no crea índices secundarios manuales. Las claves primarias y restricciones `UNIQUE` de Oracle conservan los mecanismos que el motor necesita para implementar esas restricciones; MongoDB mantiene su índice automático de `_id`.
+- La carga es sintética, pequeña y homogénea. No representa la distribución, concurrencia ni hardware de un entorno de producción.
 
-- Los accesos efectivos del empleado se calculan con los datos embebidos en su agregado.
-- Una solicitud contiene los datos necesarios para revisar quién la inició, qué acceso pide y quién la aprobó.
-- Las aprobaciones y la auditoría de una solicitud se consultan juntas, sin `$lookup`.
+Para obtener una comparación estricta habría que ejecutar ambos motores con recursos equivalentes, repetir la carga y fijar el estado de caché, concurrencia y medición. Oracle APEX no permite controlar ni conocer todos esos parámetros del servicio compartido.
 
-**Desventajas**
+## Cómo reproducir
 
-- Los roles, aplicaciones y permisos aparecen repetidos en los agregados donde se necesitan.
-- Al cambiar la descripción o los permisos de un rol, hay que decidir cómo actualizar los snapshots existentes.
-- Las relaciones compartidas y reglas que Oracle expresa con claves foráneas deben mantenerse mediante la aplicación y los validadores.
+En Oracle APEX SQL Workshop, ejecutar `01_modelo_iam.sql`, `02_insercion_datos_iam.sql`, `03_operaciones_iam.sql` y luego `04_datos_benchmark_5000.sql`. Ejecutar cinco veces `05_benchmark_consultas.sql` o el script guardado `TP IAM - 05 benchmark consultas`. La carga SQL es de una sola ejecución por esquema porque usa identificadores fijos.
 
-### Oracle relacional
+En una instancia MongoDB local, ejecutar los cinco scripts listados en [`README.md`](README.md). `05_benchmark_consultas.js` comprueba que los conteos permanezcan en 12.500 y 7.500 y muestra los milisegundos de cada repetición.
 
-**Ventajas**
-
-- Los catálogos compartidos se almacenan una sola vez y se vinculan con claves foráneas.
-- Las restricciones declarativas ayudan a impedir relaciones inválidas.
-- Los `JOIN` permiten obtener informes transversales y consultar las entidades relacionadas.
-
-**Desventajas**
-
-- Para mostrar una solicitud completa hay que combinar varias tablas.
-- El modelo tiene más tablas y relaciones que mantener para este flujo.
-
-## Conclusión
-
-El modelo MongoDB actual sigue la pauta de la cátedra: cada consulta funcional recibe un agregado con los datos relacionados que necesita, y no se usan identificadores para ir a buscar detalles a otras colecciones. Los snapshots reducen lecturas y a la vez duplican información.
-
-Oracle sigue siendo una opción muy adecuada para IAM porque empleados, roles y permisos son entidades compartidas con reglas de integridad. Para una comparación de rendimiento todavía falta implementar y ejecutar en Oracle las mismas operaciones y el mismo volumen de datos. La tabla anterior es una comparación de diseño, no una medición de velocidad.
+Los scripts `.js` son instrucciones de `mongosh`, no una aplicación JavaScript con un driver externo. Las operaciones de consulta son agregaciones propias de MongoDB y recorren los documentos embebidos sin `$lookup`.
 
 ## Fuentes técnicas
 
-- MongoDB explica cuándo conviene embeber datos relacionados que se consultan juntos: [Model One-to-Many Relationships with Embedded Documents](https://www.mongodb.com/docs/manual/tutorial/model-embedded-one-to-many-relationships-between-documents/).
-- MongoDB explica cuándo considerar referencias para relaciones muchos a muchos y datos consultados por separado: [Reference Data in Your MongoDB Schema](https://www.mongodb.com/docs/manual/data-modeling/referencing/).
-- MongoDB permite validar estructura y tipos con `$jsonSchema`: [Specify JSON Schema Validation](https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/).
+- MongoDB explica la elección entre documentos embebidos y referencias según el patrón de consulta: [Enforce Data Consistency with Embedding](https://www.mongodb.com/docs/manual/data-modeling/enforce-consistency/embed-data/).
+- MongoDB documenta la validación de estructura y tipos con `$jsonSchema`: [Specify JSON Schema Validation](https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/).
+- Oracle documenta la ejecución de comandos desde SQL Workshop: [Using the Command Editor](https://docs.oracle.com/en/database/oracle/apex/26.2/aeutl/using-command-editor.html).
+- Oracle documenta la ejecución de scripts y la visualización de resultados en SQL Workshop: [Using SQL Scripts](https://docs.oracle.com/en/database/oracle/apex/26.2/aeutl/using-sql-scripts.html).

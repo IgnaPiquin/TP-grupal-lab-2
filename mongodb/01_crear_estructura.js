@@ -4,6 +4,7 @@
   const iam = db.getSiblingDB("gestor_accesos_iam_embebido");
   const string = { bsonType: "string" };
   const nullableDate = { bsonType: ["date", "null"] };
+  const nullableString = { bsonType: ["string", "null"] };
 
   const rolResumen = {
     bsonType: "object",
