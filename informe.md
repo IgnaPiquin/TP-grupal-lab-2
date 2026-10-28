@@ -79,12 +79,14 @@ Se ejecutaron los scripts en SQL Workshop, conectados al esquema de trabajo:
 | Script | Resultado observado |
 |---|---|
 | 01_modelo_iam.sql | 16 sentencias exitosas y 0 errores; se crearon las tablas y comentarios del modelo. |
-| 02_insercion_datos_iam.sql | Bloque de carga demo ejecutado sin errores; agregó dos empleados, catálogos y dos solicitudes pendientes. |
-| 03_operaciones_iam.sql | 2 sentencias exitosas y 0 errores; aprobó una solicitud y consultó los permisos efectivos, con 3 resultados de demostración. |
+| 02_insercion_datos_iam.sql | Ejecución inicial: dos empleados, catálogos y dos solicitudes en aprobación. La versión actual incorpora además los casos de modificación aprobada, baja rechazada y alta para probar el paquete, junto con una asignación directa; las inserciones nuevas requieren validación puntual en APEX. |
+| 03_operaciones_iam.sql | Ejecución inicial: aprobación de una solicitud y consulta de permisos con 3 resultados. La versión actual suma cursor, función, procedimiento con control de errores y paquete; estos bloques agregados requieren validación puntual en APEX. |
 | 04_datos_benchmark_5000.sql | Se insertaron 5.000 filas en cada tabla de empleados, asignaciones directas, solicitudes y aprobaciones. |
 | 05_benchmark_consultas.sql | Se ejecutaron cinco veces las dos consultas de lectura para medir sus tiempos. |
 
 La verificación de cardinalidad en SQL Commands devolvió 5.000 empleados sintéticos, 5.000 solicitudes sintéticas, 12.500 permisos efectivos y 7.500 filas de detalle de solicitudes.
+
+Los IDs de demo 1 a 5 son distintos de los rangos sintéticos del benchmark. Por eso las ampliaciones no alteran los resultados de rendimiento; no hace falta repetir la carga ni las consultas del benchmark. En un esquema limpio, ejecutar los scripts en orden. En el esquema ya cargado, no repetir las cargas con identificadores fijos: revisar primero los IDs demo 3 a 5 y probar puntualmente las inserciones y los objetos PL/SQL agregados.
 
 ### MongoDB
 
@@ -139,7 +141,7 @@ El repositorio adjunta el código fuente SQL y los scripts de mongosh:
 - mongodb/benchmarking.md: mediciones detalladas y procedimiento de repetición.
 - codigo_entrega.txt: consolidación de los scripts para adjuntar como archivo de código.
 
-En Oracle, ejecutar primero los scripts de modelo y demo; el script de benchmark se carga una sola vez por esquema porque utiliza identificadores fijos. En MongoDB, seguir el orden de ejecución documentado en mongodb/README.md.
+En un esquema Oracle limpio, ejecutar los scripts 01 a 05 en orden; las cargas demo y benchmark usan identificadores fijos y se ejecutan una sola vez. En un esquema que ya contiene datos, no repetir esas cargas completas. En MongoDB, seguir el orden de ejecución documentado en mongodb/README.md.
 
 ## Referencias
 
