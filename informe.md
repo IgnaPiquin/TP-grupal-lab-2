@@ -79,14 +79,14 @@ Se ejecutaron los scripts en SQL Workshop, conectados al esquema de trabajo:
 | Script | Resultado observado |
 |---|---|
 | 01_modelo_iam.sql | 16 sentencias exitosas y 0 errores; se crearon las tablas y comentarios del modelo. |
-| 02_insercion_datos_iam.sql | Ejecución inicial: dos empleados, catálogos y dos solicitudes en aprobación. La versión actual incorpora además los casos de modificación aprobada, baja rechazada y alta para probar el paquete, junto con una asignación directa; las inserciones nuevas requieren validación puntual en APEX. |
-| 03_operaciones_iam.sql | Ejecución inicial: aprobación de una solicitud y consulta de permisos con 3 resultados. La versión actual suma cursor, función, procedimiento con control de errores y paquete; estos bloques agregados requieren validación puntual en APEX. |
+| 02_insercion_datos_iam.sql | Se cargaron los casos de modificación aprobada, baja rechazada y alta aprobada mediante el paquete, además de una asignación directa. La consulta final confirmó las cinco solicitudes, sus estados y aprobaciones, cuatro asignaciones y ocho eventos de auditoría. |
+| 03_operaciones_iam.sql | Se ejecutaron el cursor, la función de permisos, el procedimiento de aprobación y su control de error, y el paquete. El procedimiento aprobó la solicitud 2; el caso inexistente produjo y capturó ORA-20001. La función devolvió S para un permiso concedido. La especificación, el cuerpo del paquete, la función y el procedimiento quedaron VALID en USER_OBJECTS. El paquete aprobó la solicitud 5 y confirmó el acceso solicitado. |
 | 04_datos_benchmark_5000.sql | Se insertaron 5.000 filas en cada tabla de empleados, asignaciones directas, solicitudes y aprobaciones. |
 | 05_benchmark_consultas.sql | Se ejecutaron cinco veces las dos consultas de lectura para medir sus tiempos. |
 
-La verificación de cardinalidad en SQL Commands devolvió 5.000 empleados sintéticos, 5.000 solicitudes sintéticas, 12.500 permisos efectivos y 7.500 filas de detalle de solicitudes.
+En SQL Commands se verificaron 5.000 empleados sintéticos y 5.000 solicitudes sintéticas. Las dos consultas de control se ejecutaron nuevamente después de cargar los casos demo: la de accesos devolvió 12.500 combinaciones y la de solicitudes pendientes, 7.500 filas. También se confirmaron los estados de las solicitudes 1 a 5, cuatro asignaciones (incluida la directa), ocho eventos de auditoría y los cuatro objetos PL/SQL válidos. La función independiente devolvió S para el permiso consultado; el paquete aprobó la solicitud 5 y su función confirmó el acceso.
 
-Los IDs de demo 1 a 5 son distintos de los rangos sintéticos del benchmark. Por eso las ampliaciones no alteran los resultados de rendimiento; no hace falta repetir la carga ni las consultas del benchmark. En un esquema limpio, ejecutar los scripts en orden. En el esquema ya cargado, no repetir las cargas con identificadores fijos: revisar primero los IDs demo 3 a 5 y probar puntualmente las inserciones y los objetos PL/SQL agregados.
+Los IDs de demo 1 a 5 son distintos de los rangos sintéticos del benchmark. Las inserciones demo no modificaron el conjunto ni las mediciones registradas. Las cinco repeticiones de rendimiento se conservan sin cambios; solo se reejecutaron las consultas de conteo para confirmar que las cardinalidades se mantuvieron. En un esquema limpio, ejecutar los scripts en orden. En un esquema ya cargado, no repetir las cargas con identificadores fijos.
 
 ### MongoDB
 
@@ -132,7 +132,7 @@ Se ejecutaron cargas y consultas en ambos motores con la misma escala sintética
 
 ## Archivos de implementación y reproducción
 
-El repositorio adjunta el código fuente SQL y los scripts de mongosh:
+El repositorio adjunta el código fuente SQL y los scripts de mongosh. También incluye capturas de las cardinalidades verificadas en SQL Commands: `evidencias_apex/benchmark_accesos_12500.png` (12.500) y `evidencias_apex/benchmark_solicitudes_7500.png` (7.500).
 
 - 01_modelo_iam.sql, 02_insercion_datos_iam.sql y 03_operaciones_iam.sql: esquema y operaciones Oracle.
 - 04_datos_benchmark_5000.sql y 05_benchmark_consultas.sql: carga y consultas para Oracle.
