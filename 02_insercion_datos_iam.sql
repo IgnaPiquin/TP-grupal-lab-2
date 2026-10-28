@@ -78,5 +78,15 @@ BEGIN
     INSERT INTO empleado_rol (empleado_id, rol_id, origen, solicitud_origen_id, asignado_por_id, motivo)
     VALUES (2, 4, 'DIRECTO', NULL, 2, 'Asignación directa por necesidad operativa excepcional.');
 
+    -- 8. Solicitud pendiente para probar el procedimiento del paquete
+    INSERT INTO solicitud (solicitud_id, solicitante_id, rol_solicitado_id, tipo, estado, motivo)
+    VALUES (5, 1, 4, 'ALTA', 'EN_APROBACION', 'Alta de rol para probar el paquete de gestión IAM.');
+
+    INSERT INTO aprobacion (aprobacion_id, solicitud_id, numero_paso, rol_aprobador_id, estado)
+    VALUES (5, 5, 1, 2, 'PENDIENTE');
+
+    INSERT INTO log_auditoria (actor_id, solicitud_id, objeto_tipo, id_registro, accion, detalle)
+    VALUES (1, 5, 'SOLICITUD', 5, 'SOLICITUD_CREADA', 'Alta pendiente para demostrar el paquete PL/SQL.');
+
     COMMIT;
 END;
