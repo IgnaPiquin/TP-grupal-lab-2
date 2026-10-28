@@ -56,5 +56,27 @@ BEGIN
     INSERT INTO log_auditoria (actor_id, solicitud_id, objeto_tipo, id_registro, accion, detalle)
     VALUES (1, 2, 'SOLICITUD', 2, 'SOLICITUD_CREADA', 'Alta solicitada para rol Consulta de finanzas');
 
+    INSERT INTO solicitud (solicitud_id, solicitante_id, rol_solicitado_id, rol_anterior_id, tipo, estado, motivo, fecha_cierre)
+    VALUES (3, 1, 4, 1, 'MODIFICACION', 'APROBADA', 'Actualización de perfil por rotación interna de tareas.', SYSTIMESTAMP);
+
+    INSERT INTO aprobacion (aprobacion_id, solicitud_id, numero_paso, rol_aprobador_id, aprobador_id, estado, fecha_decision, comentario)
+    VALUES (3, 3, 1, 2, 2, 'APROBADA', SYSTIMESTAMP, 'Aprobado por jefatura de RRHH.');
+
+    INSERT INTO log_auditoria (actor_id, solicitud_id, objeto_tipo, id_registro, accion, detalle)
+    VALUES (1, 3, 'SOLICITUD', 3, 'SOLICITUD_MODIFICACION', 'Solicitud de modificación de rol procesada y aprobada.');
+
+    INSERT INTO solicitud (solicitud_id, solicitante_id, rol_solicitado_id, rol_anterior_id, tipo, estado, motivo, fecha_cierre)
+    VALUES (4, 2, 2, NULL, 'BAJA', 'RECHAZADA', 'Solicitud de cese de rol rechazada por control interno.', SYSTIMESTAMP);
+
+    INSERT INTO aprobacion (aprobacion_id, solicitud_id, numero_paso, rol_aprobador_id, aprobador_id, estado, fecha_decision, comentario)
+    VALUES (4, 4, 1, 2, 2, 'RECHAZADA', SYSTIMESTAMP, 'Se requiere mantener el rol activo por funciones vigentes.');
+
+    INSERT INTO log_auditoria (actor_id, solicitud_id, objeto_tipo, id_registro, accion, detalle)
+    VALUES (2, 4, 'SOLICITUD', 4, 'SOLICITUD_RECHAZADA', 'Solicitud de baja rechazada por el aprobador.');
+
+    -- 7. Asignaciones Directas Iniciales
+    INSERT INTO empleado_rol (empleado_id, rol_id, origen, solicitud_origen_id, asignado_por_id, motivo)
+    VALUES (2, 4, 'DIRECTO', NULL, 2, 'Asignación directa por necesidad operativa excepcional.');
+
     COMMIT;
 END;
