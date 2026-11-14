@@ -4,7 +4,7 @@
 
 **Materia:** Laboratorio 2
 
-**Integrante identificado:** Ignacio Piquín Villegas
+**Integrantes:** Ignacio Piquín Villegas, Julián Luna Ferenaz
 
 **Integrantes restantes:** pendiente completar los nombres del grupo
 
